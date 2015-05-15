@@ -4,7 +4,12 @@
 	  escape_char/1
 	]).
 
--spec prepare(SQLTemplate :: string(), Args :: list()) ->
+-spec prepare(SQLTemplate :: string(), Args :: [ number() |
+						 atom() |
+						 string() |
+						 {list, list()} |
+						 {dictionary, [{atom(), term()}]}
+					       ]) ->
 		     PreparedSQL :: string() | {error, Reason :: term()}.
 %%      By using some SQL template like "select * from what where field = ?;"
 %% then it determines if there are such many placeholders '?' for arguments
@@ -56,6 +61,18 @@ prepare_argument(N) when is_number(N) ->
 prepare_argument(A) when is_atom(A) ->
     Str = format_string("~s", [A]),
     concat_string(["'", escape_string(Str), "'"]);
+prepare_argument({list, List}) when is_list(List) ->
+    string:join(lists:map(fun(E) -> prepare_argument(E) end, List), ", ");
+prepare_argument({dictionary, KeyValueList}) when is_list(KeyValueList) ->
+    separated_string(
+      lists:map(fun({Key, Value}) ->
+			format_string("~s = ~s", [Key, prepare_argument(Value)])
+		end, KeyValueList), ", ");
+prepare_argument({conditions, KeyValueList}) when is_list(KeyValueList) ->
+    separated_string(
+      lists:map(fun({Key, Value}) ->
+			format_string("~s = ~s", [Key, prepare_argument(Value)])
+		end, KeyValueList), " and ");
 prepare_argument(S) when is_list(S) ->
     concat_string(["'", escape_string(S), "'"]).
 
@@ -64,6 +81,9 @@ format_string(StrTemp, Args) ->
 
 concat_string(StrList) when is_list(StrList) ->
     lists:flatten(string:join(StrList, ""), "").
+
+separated_string(StrList, Separator) when is_list(StrList) ->
+    lists:flatten(string:join(StrList, Separator)).
 
 escape_string(Str) ->
     lists:map(fun(Char) -> escape_char(Char) end, Str).
@@ -80,5 +100,9 @@ escape_char($\x{25}) -> "\\%";
 escape_char($\') -> "\\'";
 escape_char($\\) -> "\\\\";
 escape_char($\_) -> "\\_";
-escape_char(Any) when is_number(Any) ->
-    lists:flatten(io_lib:format("~c", [Any])).
+escape_char(N) when is_number(N) ->
+    if N > 255 ->
+	    lists:flatten(io_lib:format("~ts", [[N]]));
+       true ->
+	    lists:flatten(io_lib:format("~c", [N]))
+    end.
